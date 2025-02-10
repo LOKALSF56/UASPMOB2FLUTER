@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:mycalapp/screens/Account_screen.dart';
+import 'package:mycalapp/screens/data_kalori.dart';
+import 'package:mycalapp/screens/Cek_BMI.dart';
+import 'package:mycalapp/screens/konsumsi_kalori.dart';
 
 class Home_Screen extends StatelessWidget {
   const Home_Screen({super.key});
@@ -29,21 +34,27 @@ class Home_Screen extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // **Display the current user's name**
-                    FutureBuilder<User?>(
+                    FutureBuilder<DocumentSnapshot>(
                       future: FirebaseAuth.instance.currentUser != null
-                          ? Future.value(FirebaseAuth.instance.currentUser)
+                          ? FirebaseFirestore.instance
+                              .collection('users')
+                              .doc(FirebaseAuth.instance.currentUser!.uid)
+                              .get()
                           : Future.value(null),
                       builder: (context, snapshot) {
-                        if (snapshot.connectionState == ConnectionState.waiting) {
+                        if (snapshot.connectionState ==
+                            ConnectionState.waiting) {
                           return CircularProgressIndicator();
                         } else if (snapshot.hasError) {
                           return Text('Error loading user data');
-                        } else if (!snapshot.hasData) {
-                          return Text('User not logged in');
+                        } else if (!snapshot.hasData ||
+                            !snapshot.data!.exists) {
+                          return Text('Selamat Datang, User');
                         } else {
-                          User? user = snapshot.data;
+                          var userData =
+                              snapshot.data!.data() as Map<String, dynamic>;
                           return Text(
-                            'Selamat Datang, ${user?.displayName ?? 'User'}',  // Display user name if available
+                            'Selamat Datang, ${userData['name'] ?? 'User'}',
                             style: TextStyle(
                               fontSize: 26,
                               fontWeight: FontWeight.bold,
@@ -88,7 +99,12 @@ class Home_Screen extends StatelessWidget {
                   ),
                   child: IconButton(
                     icon: Icon(Icons.menu, color: Colors.black),
-                    onPressed: () {},
+                    onPressed: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => MenuPage()),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -117,7 +133,22 @@ class Home_Screen extends StatelessWidget {
                   title: 'Cek Konsumsi Kalori',
                   subtitle: 'Pantau Asupan Kalorimu',
                   imageAsset: 'assets/bg1.png',
-                  onTap: () {},
+                  onTap: () {
+                    String userId =
+                        FirebaseAuth.instance.currentUser?.uid ?? '';
+                    if (userId.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) =>
+                                CalorieScreen(userId: userId)),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('User tidak ditemukan')),
+                      );
+                    }
+                  },
                   titleFontSize: 16,
                   subtitleFontSize: 14,
                 ),
@@ -125,15 +156,35 @@ class Home_Screen extends StatelessWidget {
                   title: 'Cek BMI',
                   subtitle: 'Cek Postur Tubuh Kamu',
                   imageAsset: 'assets/bg2.png',
-                  onTap: () {},
+                  onTap: () {
+                    String userId =
+                        FirebaseAuth.instance.currentUser?.uid ?? '';
+                    if (userId.isNotEmpty) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => BMIScreen(userId: userId)),
+                      );
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('User tidak ditemukan')),
+                      );
+                    }
+                  },
                   titleFontSize: 16,
                   subtitleFontSize: 14,
                 ),
                 buildMenuItem(
                   title: 'Data Kalori',
-                  subtitle: 'Informasi Kalori, dan berat badan kamu per hari.',
+                  subtitle:
+                      'Informasi Kalori, berdasarkan apa yang kamu makan.',
                   imageAsset: 'assets/bg3.png',
-                  onTap: () {},
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (context) => DataKalori()),
+                    );
+                  },
                   titleFontSize: 16,
                   subtitleFontSize: 14,
                 ),
@@ -157,7 +208,8 @@ class Home_Screen extends StatelessWidget {
     return Container(
       margin: EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.black, width: 1), // Border hitam tebal 1
+        border:
+            Border.all(color: Colors.black, width: 1), // Border hitam tebal 1
         borderRadius: BorderRadius.circular(10),
         color: Colors.white,
       ),
@@ -177,7 +229,8 @@ class Home_Screen extends StatelessWidget {
         ),
         trailing: ClipRRect(
           borderRadius: BorderRadius.circular(8),
-          child: Image.asset(imageAsset, width: 70, height: 70, fit: BoxFit.cover),
+          child:
+              Image.asset(imageAsset, width: 70, height: 70, fit: BoxFit.cover),
         ),
         onTap: onTap,
       ),

@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_facebook_auth/flutter_facebook_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mycalapp/screens/Home_Screen.dart';
+import 'package:mycalapp/screens/Register_screen.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:io';
+import 'package:path_provider/path_provider.dart';
 
 class Login_Screen extends StatefulWidget {
   const Login_Screen({super.key});
@@ -18,6 +23,7 @@ class _LoginScreenState extends State<Login_Screen> {
   final TextEditingController _passwordController = TextEditingController();
   final FirebaseAuth _auth = FirebaseAuth.instance;
   bool _isLoading = false;
+  bool _isPasswordVisible = false;
 
   @override
   void initState() {
@@ -25,12 +31,47 @@ class _LoginScreenState extends State<Login_Screen> {
     _checkLoginStatus();
   }
 
+  Future<String> _uploadImageToStorage(String userId, String imageUrl) async {
+    try {
+      final response = await http.get(Uri.parse(imageUrl));
+      final tempDir = await getTemporaryDirectory();
+      final file = File('${tempDir.path}/$userId.jpg');
+      await file.writeAsBytes(response.bodyBytes);
+
+      final ref =
+          FirebaseStorage.instance.ref().child('profile_images/$userId.jpg');
+      await ref.putFile(file);
+
+      return await ref.getDownloadURL();
+    } catch (e) {
+      print("Gagal mengunggah foto profil: $e");
+      return imageUrl; // Jika gagal, tetap gunakan URL asli Facebook
+    }
+  }
+
+  Future<void> _saveUserToFirestore(User user, String? imageUrl) async {
+    final userRef =
+        FirebaseFirestore.instance.collection('users').doc(user.uid);
+    final userData = await userRef.get();
+
+    if (!userData.exists) {
+      await userRef.set({
+        'name': user.displayName ?? "User",
+        'email': user.email,
+        'gender': "", // Bisa diisi nanti oleh user
+        'age': "", // Bisa diisi nanti oleh user
+        'profileImage': imageUrl ?? "",
+      });
+    }
+  }
 
   Future<void> _checkLoginStatus() async {
     final prefs = await SharedPreferences.getInstance();
     bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+    String? userId = prefs.getString('userId'); // Ambil userId
 
-    if (isLoggedIn) {
+    if (isLoggedIn && userId != null) {
+      print("User ID: $userId"); // Debugging
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (context) => Home_Screen()),
@@ -38,23 +79,33 @@ class _LoginScreenState extends State<Login_Screen> {
     }
   }
 
-  Future<void> _saveLoginState(bool isLoggedIn) async {
+  Future<void> _saveLoginState(bool isLoggedIn, String userId) async {
     final prefs = await SharedPreferences.getInstance();
-    prefs.setBool('isLoggedIn', isLoggedIn);
+    await prefs.setBool('isLoggedIn', isLoggedIn);
+    await prefs.setString('userId', userId);
   }
 
   Future<void> _loginWithEmail() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      _showError("Kolom wajib diisi");
+      return;
+    }
+
     setState(() => _isLoading = true);
     try {
-      await _auth.signInWithEmailAndPassword(
+      UserCredential userCredential = await _auth.signInWithEmailAndPassword(
         email: _emailController.text,
         password: _passwordController.text,
       );
-      _saveLoginState(true);
+
+      await _saveUserToFirestore(userCredential.user!, null);
+
+      _saveLoginState(true, userCredential.user!.uid);
+
       Navigator.pushReplacement(
           context, MaterialPageRoute(builder: (context) => Home_Screen()));
     } catch (e) {
-      _showError(e.toString());
+      _showError("Email atau password salah");
     }
     setState(() => _isLoading = false);
   }
@@ -65,14 +116,27 @@ class _LoginScreenState extends State<Login_Screen> {
       final GoogleSignInAccount? googleUser = await GoogleSignIn().signIn();
       if (googleUser == null) return;
       final GoogleSignInAuthentication googleAuth =
-      await googleUser.authentication;
+          await googleUser.authentication;
       final AuthCredential credential = GoogleAuthProvider.credential(
         accessToken: googleAuth.accessToken,
         idToken: googleAuth.idToken,
       );
       final userCredential = await _auth.signInWithCredential(credential);
-      _saveLoginState(true);
-      _saveUserData(userCredential.user);
+
+      // Cek apakah foto profil ada
+      String? profileImageUrl = userCredential.user?.photoURL;
+
+      // Jika ada foto profil, upload ke Firebase Storage dan dapatkan URL baru
+      if (profileImageUrl != null) {
+        profileImageUrl = await _uploadImageToStorage(
+            userCredential.user!.uid, profileImageUrl);
+      }
+
+      // Simpan data pengguna ke Firestore
+      await _saveUserToFirestore(userCredential.user!, profileImageUrl);
+
+      _saveLoginState(true, userCredential.user!.uid);
+
       Navigator.pushReplacement(
           context, MaterialPageRoute(builder: (context) => Home_Screen()));
     } catch (e) {
@@ -85,22 +149,27 @@ class _LoginScreenState extends State<Login_Screen> {
     setState(() => _isLoading = true);
     try {
       final LoginResult result = await FacebookAuth.instance.login();
-
       if (result.status == LoginStatus.success) {
         final AccessToken? accessToken = result.accessToken;
-
         if (accessToken != null) {
           final OAuthCredential credential =
-          FacebookAuthProvider.credential(accessToken.tokenString);
+              FacebookAuthProvider.credential(accessToken.tokenString);
           final userCredential =
-          await FirebaseAuth.instance.signInWithCredential(credential);
+              await FirebaseAuth.instance.signInWithCredential(credential);
 
+          final user = userCredential.user!;
+          String? profileImageUrl = user.photoURL; // URL dari Facebook
 
-          _saveUserData(userCredential.user);
+          // Jika foto profil ada, upload ke Firebase Storage dan ambil URL baru
+          if (profileImageUrl != null) {
+            profileImageUrl =
+                await _uploadImageToStorage(user.uid, profileImageUrl);
+          }
 
+          // Simpan data pengguna ke Firestore
+          await _saveUserToFirestore(user, profileImageUrl);
 
-          _saveLoginState(true);
-
+          _saveLoginState(true, user.uid);
 
           Navigator.pushReplacement(
               context, MaterialPageRoute(builder: (context) => Home_Screen()));
@@ -112,18 +181,6 @@ class _LoginScreenState extends State<Login_Screen> {
       _showError(e.toString());
     }
     setState(() => _isLoading = false);
-  }
-
-  Future<void> _saveUserData(User? user) async {
-    if (user != null) {
-      final userRef =
-      FirebaseFirestore.instance.collection('users').doc(user.uid);
-      await userRef.set({
-        'name': user.displayName ?? "User",
-        'email': user.email,
-        'photoURL': user.photoURL,
-      }, SetOptions(merge: true));
-    }
   }
 
   void _showError(String message) {
@@ -153,41 +210,60 @@ class _LoginScreenState extends State<Login_Screen> {
                 filled: true,
                 fillColor: Colors.grey[200],
                 border:
-                OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
             SizedBox(height: 10),
             TextField(
               controller: _passwordController,
-              obscureText: true,
+              obscureText: !_isPasswordVisible,
               decoration: InputDecoration(
                 hintText: "Password",
                 filled: true,
                 fillColor: Colors.grey[200],
                 border:
-                OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                suffixIcon: IconButton(
+                  icon: Icon(
+                    _isPasswordVisible
+                        ? Icons.visibility
+                        : Icons.visibility_off,
+                  ),
+                  onPressed: () {
+                    setState(() {
+                      _isPasswordVisible = !_isPasswordVisible;
+                    });
+                  },
+                ),
               ),
             ),
             SizedBox(height: 20),
             _isLoading
                 ? Center(child: CircularProgressIndicator())
                 : ElevatedButton(
-              onPressed: _loginWithEmail,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue,
-                padding: EdgeInsets.symmetric(vertical: 15),
-                textStyle: TextStyle(fontSize: 18),
-              ),
-              child: Center(
-                  child: Text("Masuk",
-                      style: TextStyle(color: Colors.white))),
-            ),
+                    onPressed: _loginWithEmail,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      padding: EdgeInsets.symmetric(vertical: 15),
+                      textStyle: TextStyle(fontSize: 18),
+                    ),
+                    child: Center(
+                        child: Text("Masuk",
+                            style: TextStyle(color: Colors.white))),
+                  ),
             SizedBox(height: 10),
             GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => RegisterPage()),
+                );
+              },
               child: Center(
                 child: Text(
                   "Belum Punya Akun? Daftar Disini",
-                  style: TextStyle(fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                      fontWeight: FontWeight.bold, color: Colors.blue),
                 ),
               ),
             ),
