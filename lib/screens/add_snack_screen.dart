@@ -144,7 +144,7 @@ class _TambahCemilanScreenState extends State<TambahCemilanScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Sarapan")),
+      appBar: AppBar(title: const Text("Cemilan")),
       body: Column(
         children: [
           Expanded(

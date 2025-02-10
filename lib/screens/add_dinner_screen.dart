@@ -144,7 +144,7 @@ class _TambahDinnerScreenState extends State<TambahDinnerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Sarapan")),
+      appBar: AppBar(title: const Text("Tambah Makan Malam")),
       body: Column(
         children: [
           Expanded(

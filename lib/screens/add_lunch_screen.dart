@@ -145,7 +145,7 @@ class _TambahMknsiangScreennState extends State<TambahMknsiangScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Sarapan")),
+      appBar: AppBar(title: const Text("Makan Siang")),
       body: Column(
         children: [
           Expanded(
